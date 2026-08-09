@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# periscope — unified entry point for the observability workflow.
+#
+# Two use cases:
+#   1. Continuous system monitoring:  periscope stack up|down|status
+#   2. Run an experiment and collect data:  periscope run <experiment>
+#
+# Subcommands:
+#   stack up|down|status     Manage the containerized monitoring stack
+#                            (Prometheus + Grafana + node_exporter).
+#   trace <tool> [args]      Run an eBPF tool one-shot (biolat|runqlat|offcpu),
+#                            or start it as a Prometheus exporter with --exporter.
+#   export start|stop        Start/stop all three eBPF exporters (host processes).
+#   run <experiment>         Run a known experiment and capture monitoring-layer
+#                            + eBPF evidence into a results directory.
+#   tools                    List available eBPF tools and experiments.
+#
+# Experiments (see scripts/m4/ and ROADMAP M4):
+#   sqlite-baseline          sqlite insert benchmark, no injected anomaly.
+#   sqlite-anomaly           sqlite insert benchmark with a background writer.
+#
+# Examples:
+#   periscope stack up
+#   periscope trace biolat -d 10
+#   periscope export start            # then open the Grafana eBPF dashboard
+#   periscope run sqlite-anomaly      # writes ./results/<timestamp>/
+
+set -u
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_FILE="$PROJECT_DIR/monitoring/docker-compose.yml"
+RESULTS_DIR="$PROJECT_DIR/results"
+
+BIOLAT="$PROJECT_DIR/tools/biolat/target/release/biolat"
+RUNQLAT="$PROJECT_DIR/tools/runqlat/target/release/runqlat"
+OFFCPU="$PROJECT_DIR/tools/offcpu/target/release/offcpu"
+
+# Exporter ports (see DECISIONS.md D-003).
+BIOLAT_PORT=9601
+RUNQLAT_PORT=9602
+OFFCPU_PORT=9603
+
+err() { echo "periscope: $*" >&2; }
+die() { err "$*"; exit 1; }
+
+usage() {
+    # Print the header comment block (lines 2 up to the first non-comment).
+    awk 'NR>=2 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
+}
+
+require_bin() {
+    [ -x "$1" ] || die "$1 not built. Build with: (cd tools/$2 && cargo build --release)"
+}
+
+# ---------------------------------------------------------------- stack
+cmd_stack() {
+    local action="${1:-}"
+    case "$action" in
+        up)
+            (cd "$PROJECT_DIR/monitoring" && podman-compose -f "$COMPOSE_FILE" up -d)
+            ;;
+        down)
+            (cd "$PROJECT_DIR/monitoring" && podman-compose -f "$COMPOSE_FILE" down)
+            ;;
+        status)
+            podman ps --format '{{.Names}}\t{{.Status}}' | grep -E 'periscope' || echo "monitoring stack not running"
+            ;;
+        *)
+            die "stack: expected up|down|status"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------- trace
+cmd_trace() {
+    local tool="${1:-}"
+    shift || true
+    case "$tool" in
+        biolat) require_bin "$BIOLAT" biolat; exec "$BIOLAT" "$@" ;;
+        runqlat) require_bin "$RUNQLAT" runqlat; exec "$RUNQLAT" "$@" ;;
+        offcpu) require_bin "$OFFCPU" offcpu; exec "$OFFCPU" "$@" ;;
+        *) die "trace: expected biolat|runqlat|offcpu [args]. Try: periscope trace biolat -d 10" ;;
+    esac
+}
+
+# ---------------------------------------------------------------- export
+EXPORTER_PIDDIR="$PROJECT_DIR/.exporters"
+cmd_export() {
+    local action="${1:-}"
+    mkdir -p "$EXPORTER_PIDDIR"
+    case "$action" in
+        start)
+            require_bin "$BIOLAT" biolat; require_bin "$RUNQLAT" runqlat; require_bin "$OFFCPU" offcpu
+            start_exporter biolat "$BIOLAT" "$BIOLAT_PORT"
+            start_exporter runqlat "$RUNQLAT" "$RUNQLAT_PORT"
+            start_exporter offcpu "$OFFCPU" "$OFFCPU_PORT"
+            echo "Exporters started. Scrape targets: http://localhost:9090/targets"
+            echo "Grafana dashboard: Periscope eBPF Attribution"
+            ;;
+        stop)
+            stop_exporter biolat; stop_exporter runqlat; stop_exporter offcpu
+            ;;
+        *)
+            die "export: expected start|stop"
+            ;;
+    esac
+}
+
+start_exporter() {
+    local name="$1" bin="$2" port="$3"
+    local pidfile="$EXPORTER_PIDDIR/$name.pid"
+    if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+        echo "$name exporter already running (pid $(cat "$pidfile"), :$port)"
+        return
+    fi
+    "$bin" --exporter ":$port" >/dev/null 2>&1 &
+    echo $! > "$pidfile"
+    echo "started $name exporter on :$port (pid $!)"
+}
+
+stop_exporter() {
+    local name="$1"
+    local pidfile="$EXPORTER_PIDDIR/$name.pid"
+    if [ -f "$pidfile" ]; then
+        kill "$(cat "$pidfile")" 2>/dev/null && echo "stopped $name exporter"
+        rm -f "$pidfile"
+    else
+        echo "$name exporter not running"
+    fi
+}
+
+# ---------------------------------------------------------------- run
+cmd_run() {
+    local exp="${1:-}"
+    local ts outdir
+    ts=$(date +%Y%m%d-%H%M%S)
+    outdir="$RESULTS_DIR/${exp}-${ts}"
+    mkdir -p "$outdir"
+
+    case "$exp" in
+        sqlite-baseline|sqlite-anomaly)
+            run_sqlite "$exp" "$outdir"
+            ;;
+        *)
+            die "run: unknown experiment '$exp'. Try: periscope tools"
+            ;;
+    esac
+}
+
+run_sqlite() {
+    local exp="$1" outdir="$2"
+    require_bin "$BIOLAT" biolat; require_bin "$OFFCPU" offcpu
+
+    local script
+    if [ "$exp" = "sqlite-baseline" ]; then
+        script="$PROJECT_DIR/scripts/m4/run_baseline.sh"
+    else
+        script="$PROJECT_DIR/scripts/m4/run_anomaly.sh"
+    fi
+
+    echo "Running $exp; capturing evidence into $outdir"
+
+    # eBPF attribution in parallel with the workload.
+    "$BIOLAT" -d 14 > "$outdir/biolat.txt" 2>/dev/null &
+    local biopid=$!
+    "$OFFCPU" -d 14 > "$outdir/offcpu.txt" 2>/dev/null &
+    local offpid=$!
+    sleep 1
+
+    # The workload itself (each script has its own fixed parameters).
+    bash "$script" 2500 2>&1 | tee "$outdir/benchmark.txt"
+
+    wait "$biopid" 2>/dev/null
+    wait "$offpid" 2>/dev/null
+
+    # Monitoring-layer snapshot around the run.
+    {
+        echo "disk util vda (rate over run window):"
+        promq 'rate(node_disk_io_time_seconds_total{device="vda"}[1m])'
+        echo "write rate vda:"
+        promq 'rate(node_disk_writes_completed_total{device="vda"}[1m])'
+        echo "load1:"
+        promq 'node_load1'
+    } > "$outdir/monitoring.txt" 2>/dev/null
+
+    echo "Done. Evidence in $outdir:"
+    ls -1 "$outdir"
+}
+
+promq() {
+    curl -s -G "http://localhost:9090/api/v1/query" --data-urlencode "query=$1" \
+        | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "no data")' 2>/dev/null
+}
+
+# ---------------------------------------------------------------- tools
+cmd_tools() {
+    cat <<EOF
+eBPF tools (periscope trace <tool> ...):
+  biolat     block IO latency histogram (bcc biolatency equivalent)
+  runqlat    run queue (scheduler) latency histogram (bcc runqlat equivalent)
+  offcpu     off-CPU time by stack (bcc offcputime equivalent)
+
+Experiments (periscope run <experiment>):
+  sqlite-baseline   sqlite insert benchmark, no injected anomaly
+  sqlite-anomaly    sqlite insert benchmark with a background writer injected
+
+Monitoring:
+  periscope stack up|down|status     Prometheus + Grafana + node_exporter
+  periscope export start|stop        eBPF Prometheus exporters (:9601-9603)
+EOF
+}
+
+# ---------------------------------------------------------------- dispatch
+main() {
+    local cmd="${1:-}"
+    case "$cmd" in
+        stack) shift; cmd_stack "$@" ;;
+        trace) shift; cmd_trace "$@" ;;
+        export) shift; cmd_export "$@" ;;
+        run) shift; cmd_run "$@" ;;
+        tools) cmd_tools ;;
+        -h|--help|help|"") usage ;;
+        *) die "unknown command '$cmd'. Try: periscope --help" ;;
+    esac
+}
+
+main "$@"

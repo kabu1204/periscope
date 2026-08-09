@@ -26,3 +26,40 @@ Observability and performance engineering capability project for a personal lab 
 - Check actual project status: `./ci_report.sh all`
 - Review progress: read the latest one-page report in `checkpoints/`
 - Decisions: intervene only when a new proposal appears in `proposals/`
+
+## Using periscope
+
+The `./periscope` CLI is the unified entry point for the two core workflows.
+
+**Continuous system monitoring** (Prometheus + Grafana + node_exporter):
+
+```bash
+./periscope stack up        # start the monitoring stack
+./periscope stack status    # show running containers
+./periscope stack down      # stop it
+```
+
+**Run an experiment and collect data** (workload + monitoring + eBPF evidence):
+
+```bash
+./periscope run sqlite-baseline   # or sqlite-anomaly
+# writes ./results/<experiment>-<timestamp>/{benchmark,biolat,offcpu,monitoring}.txt
+```
+
+**Ad-hoc attribution** (run an eBPF tool directly):
+
+```bash
+./periscope trace biolat -d 10    # one-shot histogram
+./periscope trace runqlat -d 10
+./periscope trace offcpu -d 10 --top 5
+```
+
+**Continuous eBPF metrics in Grafana** (exporters feeding the eBPF dashboard):
+
+```bash
+./periscope export start          # start biolat/runqlat/offcpu exporters (:9601-9603)
+./periscope export stop
+# then open Grafana -> "Periscope eBPF Attribution"
+```
+
+See `./periscope --help` and `./periscope tools` for the full surface.

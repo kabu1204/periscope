@@ -53,3 +53,14 @@ M3 was committed, then M4 (comprehensive case study) was completed in this sessi
 3. **Monitoring wiring**: three scrape jobs in `monitoring/prometheus/prometheus.yml`; new dashboard `monitoring/grafana/dashboards/ebpf-attribution.json`.
 4. **Verification**: `scripts/verify_exporter.sh` (7 checks: /metrics content, count growth, Prometheus `up==1` per job); `ci_report.sh` M5 section. `ci_report.sh all` passes 27/27.
 5. **Docs/decisions**: `docs/M5-exporter-design.md`; DECISIONS.md D-003 (exporter design, port block, metric naming).
+
+## CLI Session Summary (appended 2026-08-10)
+
+**`./periscope` unified CLI** (bash, repo root): single entry point for the two core workflows —
+- `stack up|down|status`: manage the containerized monitoring stack (podman-compose).
+- `run <experiment>`: run a workload and capture monitoring + eBPF evidence into `results/<exp>-<ts>/` (biolat, offcpu, benchmark, monitoring snapshot).
+- `trace <tool> [args]`: run biolat/runqlat/offcpu one-shot, or with `--exporter` as a daemon.
+- `export start|stop`: start/stop all three eBPF exporters (pid files in `.exporters/`).
+- `tools`: list tools and experiments.
+
+Experiments: `sqlite-baseline`, `sqlite-anomaly` (wrap `scripts/m4/`). `results/` and `.exporters/` are gitignored. Verified end-to-end: stack status, trace biolat, export start/stop, run sqlite-anomaly (captured write-rate ~6900/s, load 3.25, biolat peak 512–1023us).
