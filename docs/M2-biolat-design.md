@@ -101,17 +101,19 @@ The histogram output matches bcc `biolatency` format:
 
 **Oracle**: bcc `biolatency-bpfcc -d vda`
 
-**Method**: run both tools in parallel under the same dd workload (200 × 4K direct writes), 5 runs. Compare the peak bucket position (the bucket with the highest count).
+**Method**: run both tools in parallel under the same fio workload (32M of 4K direct writes via libaio, iodepth=8, on a block-backed filesystem), 5 runs. Compare the peak bucket position (the bucket with the highest count).
+
+The workload file must live on a block-backed filesystem: `/tmp` is tmpfs on this machine, and tmpfs IO never reaches the block layer, so no `block_io_*` tracepoints fire. `/var/tmp` is on `/` (ext4 on vda).
 
 **Acceptance criterion**: peak positions within 2x (adjacent log2 buckets accepted).
 
 ```
 $ bash scripts/verify_m2.sh
 --- Run 1/5 ---  PASS: peak positions match (our=512 oracle=512)
---- Run 2/5 ---  PASS: peak positions match (our=256 oracle=256)
---- Run 3/5 ---  PASS: peak positions match (our=512 oracle=512)
---- Run 4/5 ---  PASS: peak positions match (our=512 oracle=256)
---- Run 5/5 ---  PASS: peak positions match (our=256 oracle=256)
+--- Run 2/5 ---  PASS: peak positions match (our=512 oracle=512)
+--- Run 3/5 ---  PASS: peak positions match (our=512 oracle=256)
+--- Run 4/5 ---  PASS: peak positions match (our=512 oracle=512)
+--- Run 5/5 ---  PASS: peak positions match (our=512 oracle=512)
 pass=5 fail=0
 ```
 
@@ -131,12 +133,13 @@ pass: 4  fail: 0
    cd tools/biolat && cargo build --release
    ```
 
-2. **Run the tool and a workload** (two terminals):
+2. **Run the tool and a workload** (two terminals). The workload file must be on a block-backed filesystem (`/var/tmp`, not tmpfs-backed `/tmp`):
    ```bash
    # Terminal 1:
    ./tools/biolat/target/release/biolat -d 10
    # Terminal 2:
-   dd if=/dev/zero of=/tmp/test bs=4k count=200 oflag=direct && rm /tmp/test
+   fio --name=t --filename=/var/tmp/test --rw=write --bs=4k --size=32M \
+       --ioengine=libaio --direct=1 --iodepth=8 --output=/dev/null && rm /var/tmp/test
    # Wait for Terminal 1 to finish (10s). You should see a histogram.
    ```
 
@@ -146,7 +149,8 @@ pass: 4  fail: 0
    ./tools/biolat/target/release/biolat -d 8 &
    timeout -s INT 8 biolatency-bpfcc -d vda &
    sleep 1
-   dd if=/dev/zero of=/tmp/test bs=4k count=200 oflag=direct && rm /tmp/test
+   fio --name=t --filename=/var/tmp/test --rw=write --bs=4k --size=32M \
+       --ioengine=libaio --direct=1 --iodepth=8 --output=/dev/null && rm /var/tmp/test
    wait
    # Compare the peak bucket positions in both outputs.
    ```
@@ -167,7 +171,7 @@ pass: 4  fail: 0
 ## Known Limitations
 
 - **Sector-based keying**: requests are correlated by sector number. If two in-flight requests have the same sector (e.g., concurrent reads of the same block), the second request's start timestamp overwrites the first, causing the first completion to be missed. This is the same limitation as bpftrace's `biolatency.bt`. The bcc tool uses the request pointer (via kprobe) for more reliable keying, but tracepoint-based keying by sector is sufficient for typical workloads.
-- **dd workload**: the verification uses `dd oflag=direct` instead of `fio` because `fio` with `ioengine=libaio` on this VM's virtio disk did not generate block IO tracepoint events. The `dd` approach generates consistent tracepoint events.
+- **Workload file location**: the verification workload must target a block-backed filesystem. `/tmp` is tmpfs on this machine, and tmpfs IO never reaches the block layer, so no `block_io_*` tracepoints fire. An earlier version of this document incorrectly attributed missing tracepoint events under fio to fio/virtio behavior; the actual cause was placing the workload file in `/tmp`. The verification now uses fio on `/var/tmp` (ext4 on vda).
 - **bcc biolatency requires `-d vda`**: without a device filter, bcc's `biolatency-bpfcc` hangs during `BPF.get_kprobe_functions()` on kernel 6.12 (a known BCC issue). The `-d vda` flag narrows the probe and avoids the slow function enumeration.
 - **No interval mode**: the tool does not support periodic histogram printing (interval mode). This is a minor feature gap; the duration mode (`-d N`) is sufficient for M2 verification.
 - **Single CPU system**: with 2 vCPUs, the block IO tracepoints fire on whichever CPU the IO completion interrupt arrives on. The BPF program is per-CPU safe (uses `bpf_map_update_elem` with `BPF_ANY`).

@@ -19,7 +19,7 @@ M2 was completed in this session:
    - Build system: `build.rs` uses `SkeletonBuilder` from libbpf-cargo; `vmlinux.h` generated from kernel BTF.
    - Tracepoint selection: initially used `block_rq_issue`/`block_rq_complete` but sectors didn't match; switched to `block_io_start`/`block_io_done` (same as bcc biolatency on modern kernels).
 
-3. **Verification**: `scripts/verify_m2.sh` runs 5 parallel comparisons between biolat and bcc `biolatency-bpfcc -d vda` under a fixed dd workload. All 5 runs pass (peak positions within 2x). Used `dd oflag=direct` instead of fio because fio with libaio didn't generate block IO tracepoint events on this VM's virtio disk.
+3. **Verification**: `scripts/verify_m2.sh` runs 5 parallel comparisons between biolat and bcc `biolatency-bpfcc -d vda` under a fixed fio workload (32M of 4K direct writes, libaio, iodepth=8, file on `/var/tmp`). All 5 runs pass (peak positions within 2x). During review, the earlier claim that fio/libaio generated no block IO tracepoint events was found to be wrong: the workload file had been placed in `/tmp`, which is tmpfs — tmpfs IO never reaches the block layer. With the file on a block-backed filesystem, fio works as the ROADMAP specifies.
 
 4. **CI**: `ci_report.sh` M2 section runs cargo fmt, clippy, build, and oracle comparison. All pass.
 
@@ -34,7 +34,6 @@ M2 was completed in this session:
 ## Open Questions
 
 - TrueNAS SCALE machine accessibility (not reachable since M0).
-- vmlinux.h management (127K lines checked into git; could be generated at build time in future).
 
 ## Recent Update
 

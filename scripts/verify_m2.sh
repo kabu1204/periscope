@@ -1,7 +1,7 @@
 #!/bin/bash
 # verify_m2.sh — Oracle comparison: biolat (our tool) vs bcc biolatency.
 #
-# Runs a fixed-parameter dd workload (≥5 runs), captures both tools' output
+# Runs a fixed-parameter fio workload (≥5 runs), captures both tools' output
 # in parallel, and compares peak bucket positions.
 #
 # Acceptance criteria (per ROADMAP.md):
@@ -10,6 +10,10 @@
 #
 # Oracle: bcc biolatency (biolatency-bpfcc -d vda)
 # If bcc is unavailable, falls back to bpftrace biolatency.bt.
+#
+# NOTE: the workload file MUST live on a block-backed filesystem. /tmp is
+# tmpfs on this machine, and tmpfs IO never reaches the block layer, so no
+# block_io_* tracepoints fire. /var/tmp is on / (ext4 on vda).
 
 set -eu
 
@@ -39,9 +43,13 @@ echo "Oracle: $ORACLE" >&2
 echo "Tool: biolat (Rust + libbpf-rs)" >&2
 
 # Fixed workload parameters.
-DD_BS=4096
-DD_COUNT=200
-DD_OF="/tmp/m2_verify_ddtest"
+# The workload file must live on a block-backed filesystem: /tmp is tmpfs on
+# this machine, and tmpfs IO never reaches the block layer (no block_io_*
+# tracepoints fire). /var/tmp is on / (ext4 on vda).
+FIO_FILE="/var/tmp/m2_verify_fiotest"
+FIO_BS="4k"
+FIO_SIZE="32M"
+FIO_IODEPTH=8
 TRACE_SECS=8
 NUM_RUNS=5
 
@@ -92,10 +100,13 @@ for run in $(seq 1 $NUM_RUNS); do
     # Let tools initialize.
     sleep 1
 
-    # Run the workload.
-    rm -f "$DD_OF"
-    dd if=/dev/zero of="$DD_OF" bs=$DD_BS count=$DD_COUNT oflag=direct 2>/dev/null
-    rm -f "$DD_OF"
+    # Run the workload: 32M of 4K direct writes via fio/libaio on a
+    # block-backed filesystem, so every IO passes through the block layer.
+    rm -f "$FIO_FILE"
+    fio --name=verify --filename="$FIO_FILE" --rw=write --bs=$FIO_BS \
+        --size=$FIO_SIZE --ioengine=libaio --direct=1 --iodepth=$FIO_IODEPTH \
+        --output=/dev/null
+    rm -f "$FIO_FILE"
 
     # Wait for both to finish.
     wait $OUR_PID 2>/dev/null || true
