@@ -15,12 +15,15 @@
 
 ## Entries
 
-## D-001 eBPF Development Language
-- Date: (To be filled before M2)
-- Decision: Rust (libbpf-rs or aya, specific library to be selected)
-- Rationale: Project constraint (see AGENTS.md)
-- Alternatives considered: bcc-python (bpftrace can substitute during tutorial phase); C + libbpf (lower development efficiency)
-- Basis: AGENTS.md engineering constraints
+## D-001 eBPF Development Language and Library
+- Date: 2026-08-09
+- Decision: Rust with libbpf-rs (libbpf-cargo for skeleton generation)
+- Rationale: BTF is available on the target kernel (`CONFIG_DEBUG_INFO_BTF=y`), enabling CO-RE (Compile Once – Run Everywhere). libbpf-rs uses the kernel's libbpf library for skeleton-based loading — the same mechanism used by bcc/libbpf-tools, making oracle comparison fair. BPF programs are written in C (compiled with clang), which is the standard and well-documented approach. libbpf-cargo integrates BPF compilation into the Cargo build system via `build.rs`.
+- Alternatives considered:
+  - aya: requires `bpfel-unknown-none` target and `bpf-linker` (not available as Debian packages, require rustup). aya writes BPF programs in Rust, which is newer and less documented. aya's Debian package (0.13.1) is older than the current crates.io release.
+  - bcc-python: bpftrace substitutes during the tutorial phase (M1); not suitable for custom standalone tools.
+  - C + libbpf: lower development efficiency than Rust for userspace code.
+- Basis: ENVIRONMENT.md PC probe results (kernel 6.12.95, BTF available, `CONFIG_BPF*` enabled); AGENTS.md engineering constraints.
 
 ## D-002 Container Runtime: podman
 - Date: 2026-08-09

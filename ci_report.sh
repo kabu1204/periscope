@@ -43,6 +43,12 @@ m1_checks() {
 
 # ---------------------------------------------------------------- M2 section
 m2_checks() {
+    check "M2: biolat cargo fmt" \
+        bash -c 'cd tools/biolat && cargo fmt -- --check'
+    check "M2: biolat cargo clippy" \
+        bash -c 'cd tools/biolat && cargo clippy -- -D warnings'
+    check "M2: biolat cargo build --release" \
+        bash -c 'cd tools/biolat && cargo build --release'
     check "M2: biolat oracle comparison" bash scripts/verify_m2.sh
 }
 
