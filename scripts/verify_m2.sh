@@ -48,8 +48,8 @@ echo "Tool: biolat (Rust + libbpf-rs)" >&2
 # tracepoints fire). /var/tmp is on / (ext4 on vda).
 FIO_FILE="/var/tmp/m2_verify_fiotest"
 FIO_BS="4k"
-FIO_SIZE="32M"
-FIO_IODEPTH=8
+FIO_SIZE="64M"
+FIO_IODEPTH=16
 TRACE_SECS=8
 NUM_RUNS=5
 
