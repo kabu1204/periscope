@@ -32,6 +32,11 @@ struct Args {
     /// Only show the top N stacks by total off-CPU time (0 = all).
     #[arg(short, long, default_value_t = 0)]
     top: usize,
+
+    /// Run as a Prometheus exporter serving GET /metrics on this address
+    /// (e.g. ":9603"), instead of a one-shot trace. Runs until killed.
+    #[arg(long, value_name = "ADDR")]
+    exporter: Option<String>,
 }
 
 /// One parsed aggregation record from the counts map.
@@ -56,6 +61,13 @@ fn main() -> Result<()> {
     // Attach all BPF programs (tracepoints).
     skel.attach()?;
 
+    if let Some(addr) = args.exporter {
+        // Exporter mode: serve /metrics until killed.
+        let obj = skel.object();
+        periscope_exporter::serve(&addr, || render_metrics(obj))?;
+        return Ok(());
+    }
+
     eprintln!(
         "Tracing off-CPU time (us) of all threads by user + kernel stack... Hit Ctrl-C to end."
     );
@@ -73,6 +85,57 @@ fn main() -> Result<()> {
     println!();
 
     Ok(())
+}
+
+/// Read all aggregation records from the counts map.
+fn read_records(obj: &libbpf::Object) -> Result<Vec<Record>> {
+    let counts = obj
+        .maps()
+        .find(|m| m.name() == "counts")
+        .expect("counts map not found in BPF object");
+    let mut records: Vec<Record> = Vec::new();
+    for key in counts.keys() {
+        if let Some(val) = counts.lookup(&key, libbpf::MapFlags::ANY)? {
+            if val.len() == 8 {
+                let total_us = u64::from_ne_bytes(val[..8].try_into().unwrap());
+                records.push(parse_key(&key, total_us)?);
+            }
+        }
+    }
+    Ok(records)
+}
+
+/// Render the Prometheus text-format exposition for off-CPU time.
+///
+/// One counter per aggregation key (pid, comm, kernel stack id, user stack id).
+/// Stack ids (not symbolized names) are used as labels to bound cardinality.
+fn render_metrics(obj: &libbpf::Object) -> String {
+    const NAME: &str = "periscope_offcpu_seconds_total";
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# HELP {NAME} Off-CPU (blocked) time per stack, in seconds.\n"
+    ));
+    out.push_str(&format!("# TYPE {NAME} counter\n"));
+
+    let records = read_records(obj).unwrap_or_default();
+    // Bound label cardinality: export only the top stacks by total off-CPU time.
+    let mut sorted = records;
+    sorted.sort_by_key(|r| std::cmp::Reverse(r.total_us));
+    const EXPORT_TOP: usize = 50;
+    sorted.truncate(EXPORT_TOP);
+    for r in &sorted {
+        // Escape any characters in comm that are special in label values.
+        let comm = r.comm.replace('\\', "\\\\").replace('"', "\\\"");
+        out.push_str(&format!(
+            "{NAME}{{pid=\"{}\",comm=\"{}\",kernel_stack_id=\"{}\",user_stack_id=\"{}\"}} {}\n",
+            r.pid,
+            comm,
+            r.kernel_stack_id,
+            r.user_stack_id,
+            r.total_us as f64 / 1e6
+        ));
+    }
+    out
 }
 
 /// Parse one raw key from the counts map into a Record (total_us filled separately).

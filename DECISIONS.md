@@ -31,3 +31,13 @@
 - Rationale: User preference for a lightweight, daemonless container runtime. podman is compatible with docker-compose YAML files and is available in Debian 13 repositories. Avoids running a persistent daemon (dockerd) on the research machine.
 - Alternatives considered: Docker (docker.io 26.1.5 — was partially installed but removed per user request); nerdctl (not available in Debian 13 repos).
 - Basis: ENVIRONMENT.md PC probe results; user instruction.
+
+## D-003 eBPF → Prometheus Exporter Design
+- Date: 2026-08-10
+- Decision: Give each custom eBPF tool (biolat, runqlat, offcpu) an opt-in long-lived exporter mode (`--exporter ADDR`) that serves a Prometheus text-format `/metrics` endpoint via a hand-rolled HTTP responder (`tools/common`, crate `periscope-exporter`). Prometheus scrapes the three exporters on a dedicated port block (biolat 9601, runqlat 9602, offcpu 9603; node_exporter uses 9100). Metrics: `periscope_block_io_latency_seconds` and `periscope_runqueue_latency_seconds` as histograms (log2 us buckets as cumulative `le` buckets in seconds, plus `_sum`/`_count` from a new `hist_sum` BPF map); `periscope_offcpu_seconds_total{pid,comm,kernel_stack_id,user_stack_id}` as counters bounded to the top 50 stacks.
+- Rationale: The user expects eBPF data to be visualizable in Grafana continuously, not only via one-shot stdout traces. A minimal in-tool exporter avoids new dependencies (per M2 coding standards) and reuses the existing containerized Prometheus/Grafana stack. Hand-rolled HTTP is sufficient for a 15s scrape interval.
+- Alternatives considered:
+  - prometheus + tiny_http crates: more idiomatic but adds transitive dependencies and a runtime; rejected to keep zero new dependencies.
+  - node_exporter textfile collector via cron: lossy (no histogram `_sum`), higher latency, requires cron + parsing.
+  - Existing general-purpose eBPF exporters (Cloudflare, Cilium): heavier, drifts toward NG3 platform territory.
+- Basis: proposals/P-001-ebpf-prometheus-exporter.md (approved 2026-08-10); user decision on HTTP library, scope, and process model.

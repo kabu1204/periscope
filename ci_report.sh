@@ -74,12 +74,22 @@ m4_checks() {
     check "M4: case-study smoke" bash scripts/verify_m4.sh
 }
 
+# ---------------------------------------------------- exporter (M5) section
+m5_checks() {
+    check "M5: exporter helper cargo fmt" \
+        bash -c 'cd tools/common && cargo fmt -- --check'
+    check "M5: exporter helper cargo clippy" \
+        bash -c 'cd tools/common && cargo clippy -- -D warnings'
+    check "M5: eBPF exporters serve /metrics and are scraped" \
+        bash scripts/verify_exporter.sh
+}
+
 main() {
     local sections=("${@:-m0}")
     for s in "${sections[@]}"; do
         case "$s" in
-            m0|m1|m2|m3|m4) "${s}_checks" ;;
-            all) m0_checks; m1_checks; m2_checks; m3_checks; m4_checks ;;
+            m0|m1|m2|m3|m4|m5) "${s}_checks" ;;
+            all) m0_checks; m1_checks; m2_checks; m3_checks; m4_checks; m5_checks ;;
             *) echo "unknown section: $s" >&2; exit 2 ;;
         esac
     done

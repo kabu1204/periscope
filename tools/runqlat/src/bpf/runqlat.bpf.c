@@ -68,6 +68,15 @@ struct {
     __type(value, u64); // count
 } hist_map SEC(".maps");
 
+// Single-slot array map: total observed latency in microseconds (slot 0) and
+// total event count (slot 1). Used to render Prometheus histogram _sum/_count.
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 2);
+    __type(key, u32);
+    __type(value, u64);
+} hist_sum SEC(".maps");
+
 // Log2 helper: returns the bucket index for a given value.
 // Index 0 = 0, Index N = 2^(N-1) to 2^N - 1.
 static __always_inline int log2_bucket(u64 v) {
@@ -130,6 +139,16 @@ int trace_sched_switch(struct sched_switch_ctx *ctx) {
         u64 init = 1;
         bpf_map_update_elem(&hist_map, &bkt_key, &init, BPF_ANY);
     }
+
+    // Accumulate total latency (us) and event count for Prometheus _sum/_count.
+    u32 sum_key = 0;
+    u64 *sum = bpf_map_lookup_elem(&hist_sum, &sum_key);
+    if (sum)
+        (*sum) += delta_us;
+    u32 cnt_key = 1;
+    u64 *tot = bpf_map_lookup_elem(&hist_sum, &cnt_key);
+    if (tot)
+        (*tot)++;
 
     return 0;
 }
