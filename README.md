@@ -63,3 +63,33 @@ The `./periscope` CLI is the unified entry point for the two core workflows.
 ```
 
 See `./periscope --help` and `./periscope tools` for the full surface.
+
+### Adjusting the eBPF reporting frequency
+
+The eBPF tools record every event in real time; the reporting frequency is how
+often Prometheus pulls the accumulated state. The three eBPF jobs scrape at **3s**
+by default (finer than the 15s global default used for node_exporter).
+
+To change it, edit `monitoring/prometheus/prometheus.yml` and set `scrape_interval`
+on the `biolat` / `runqlat` / `offcpu` jobs:
+
+```yaml
+  - job_name: "biolat"
+    scrape_interval: 1s        # raise frequency (or 5s/10s to lower it)
+    static_configs:
+      - targets: ["localhost:9601"]
+```
+
+Then reload Prometheus (no container restart needed):
+
+```bash
+curl -X POST http://localhost:9090/-/reload
+```
+
+Notes:
+- Also set the **Periscope eBPF Attribution** dashboard's `refresh` to match
+  (currently `3s`) so the panels actually redraw at the finer interval.
+- Lower intervals are most useful under heavy IO/scheduling load. For
+  `histogram_quantile` percentiles, use a rate window a few times the scrape
+  interval (e.g. `[30s]` or `[1m]`) to avoid noisy percentiles when traffic is
+  light.

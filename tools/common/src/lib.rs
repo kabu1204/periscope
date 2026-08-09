@@ -17,8 +17,15 @@ pub fn serve<F>(addr: &str, render: F) -> std::io::Result<()>
 where
     F: Fn() -> String,
 {
-    let listener = TcpListener::bind(addr)?;
-    eprintln!("Exporter listening on {addr} (GET /metrics)");
+    // Normalize a leading ":PORT" (all interfaces) to an explicit bind address;
+    // an empty host does not resolve via ToSocketAddrs.
+    let bind_addr = if let Some(port) = addr.strip_prefix(':') {
+        format!("0.0.0.0:{port}")
+    } else {
+        addr.to_string()
+    };
+    let listener = TcpListener::bind(&bind_addr)?;
+    eprintln!("Exporter listening on {bind_addr} (GET /metrics)");
     for stream in listener.incoming() {
         match stream {
             Ok(mut s) => {

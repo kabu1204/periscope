@@ -13,13 +13,17 @@ scrape_configs:
 
   # periscope eBPF tool exporters (P-001). These are long-lived host processes
   # started manually (e.g. `biolat --exporter :9601`); they are down unless the
-  # corresponding exporter is running.
+  # corresponding exporter is running. Scraped at 3s for finer attribution
+  # resolution than the 15s global default (see README "Using periscope").
   - job_name: "biolat"
+    scrape_interval: 3s
     static_configs:
       - targets: ["localhost:9601"]
   - job_name: "runqlat"
+    scrape_interval: 3s
     static_configs:
       - targets: ["localhost:9602"]
   - job_name: "offcpu"
+    scrape_interval: 3s
     static_configs:
       - targets: ["localhost:9603"]

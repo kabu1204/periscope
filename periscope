@@ -144,7 +144,8 @@ start_exporter() {
         echo "$name exporter already running (pid $(cat "$pidfile"), :$port)"
         return
     fi
-    "$bin" --exporter ":$port" >/dev/null 2>&1 &
+    # Detach into a new session so the exporter survives this CLI's exit.
+    setsid "$bin" --exporter ":$port" >/dev/null 2>&1 < /dev/null &
     echo $! > "$pidfile"
     echo "started $name exporter on :$port (pid $!)"
 }
