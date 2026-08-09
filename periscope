@@ -9,7 +9,8 @@
 #   stack up|down|status     Manage the containerized monitoring stack
 #                            (Prometheus + Grafana + node_exporter).
 #   trace <tool> [args]      Run an eBPF tool one-shot (biolat|runqlat|offcpu),
-#                            or start it as a Prometheus exporter with --exporter.
+#                            or all three at once with 'all'. Add --exporter to
+#                            run as a Prometheus exporter.
 #   export start|stop        Start/stop all three eBPF exporters (host processes).
 #   run <experiment>         Run a known experiment and capture monitoring-layer
 #                            + eBPF evidence into a results directory.
@@ -79,8 +80,38 @@ cmd_trace() {
         biolat) require_bin "$BIOLAT" biolat; exec "$BIOLAT" "$@" ;;
         runqlat) require_bin "$RUNQLAT" runqlat; exec "$RUNQLAT" "$@" ;;
         offcpu) require_bin "$OFFCPU" offcpu; exec "$OFFCPU" "$@" ;;
-        *) die "trace: expected biolat|runqlat|offcpu [args]. Try: periscope trace biolat -d 10" ;;
+        all) trace_all "$@" ;;
+        *) die "trace: expected biolat|runqlat|offcpu|all [args]. Try: periscope trace all -d 10" ;;
     esac
+}
+
+# Run all three tools one-shot for the same duration, printing each histogram
+# in turn. Usage: periscope trace all -d <secs>
+trace_all() {
+    local secs=10
+    # Extract a duration from -d/--duration if given; default 10s.
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -d|--duration) secs="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    require_bin "$BIOLAT" biolat; require_bin "$RUNQLAT" runqlat; require_bin "$OFFCPU" offcpu
+
+    local d; d=$(mktemp -d)
+    "$BIOLAT" -d "$secs" > "$d/biolat.txt" 2>/dev/null &
+    local bp=$!
+    "$RUNQLAT" -d "$secs" > "$d/runqlat.txt" 2>/dev/null &
+    local rp=$!
+    "$OFFCPU" -d "$secs" --top 10 > "$d/offcpu.txt" 2>/dev/null &
+    local op=$!
+    echo "Tracing all three for ${secs}s ..."
+    wait "$bp" "$rp" "$op" 2>/dev/null
+
+    echo; echo "===== biolat ====="; cat "$d/biolat.txt"
+    echo; echo "===== runqlat ====="; cat "$d/runqlat.txt"
+    echo; echo "===== offcpu (top 10) ====="; cat "$d/offcpu.txt"
+    rm -rf "$d"
 }
 
 # ---------------------------------------------------------------- export
@@ -149,7 +180,7 @@ cmd_run() {
 
 run_sqlite() {
     local exp="$1" outdir="$2"
-    require_bin "$BIOLAT" biolat; require_bin "$OFFCPU" offcpu
+    require_bin "$BIOLAT" biolat; require_bin "$RUNQLAT" runqlat; require_bin "$OFFCPU" offcpu
 
     local script
     if [ "$exp" = "sqlite-baseline" ]; then
@@ -160,9 +191,11 @@ run_sqlite() {
 
     echo "Running $exp; capturing evidence into $outdir"
 
-    # eBPF attribution in parallel with the workload.
+    # All three eBPF tools in parallel with the workload.
     "$BIOLAT" -d 14 > "$outdir/biolat.txt" 2>/dev/null &
     local biopid=$!
+    "$RUNQLAT" -d 14 > "$outdir/runqlat.txt" 2>/dev/null &
+    local rqlatpid=$!
     "$OFFCPU" -d 14 > "$outdir/offcpu.txt" 2>/dev/null &
     local offpid=$!
     sleep 1
@@ -170,8 +203,7 @@ run_sqlite() {
     # The workload itself (each script has its own fixed parameters).
     bash "$script" 2500 2>&1 | tee "$outdir/benchmark.txt"
 
-    wait "$biopid" 2>/dev/null
-    wait "$offpid" 2>/dev/null
+    wait "$biopid" "$rqlatpid" "$offpid" 2>/dev/null
 
     # Monitoring-layer snapshot around the run.
     {

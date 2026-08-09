@@ -50,7 +50,7 @@ The `./periscope` CLI is the unified entry point for the two core workflows.
 
 ```bash
 ./periscope trace biolat -d 10    # one-shot histogram
-./periscope trace runqlat -d 10
+./periscope trace all -d 10       # all three tools at once
 ./periscope trace offcpu -d 10 --top 5
 ```
 
