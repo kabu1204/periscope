@@ -4,38 +4,42 @@
 
 ## Current Position
 
-- Current milestone: **M2 complete — awaiting user confirmation**
-- Status: All M2 deliverables done; `ci_report.sh m2` passes (4/4). Combined M0+M1+M2: 16/16 checks pass.
+- Current milestone: **M3 complete — awaiting user confirmation**
+- Status: All M3 deliverables done; `ci_report.sh m3` passes (7/7). Combined M0+M1+M2+M3: 23/23 checks pass.
 
 ## Previous Session Summary
 
-M2 was completed in this session:
+M2 was reviewed and corrected, then M3 was completed in this session.
 
-1. **M2.0 Toolchain setup**: installed Rust 1.97.1 (via rustup), fio, bpfcc-tools, libbpf-dev, clang. Created `rust-toolchain.toml` (stable + rustfmt + clippy). Finalized D-001 (libbpf-rs) in `DECISIONS.md`. Wrote `docs/M2-coding-standards.md`.
+**M2 review corrections** (committed):
+- Found that the M2 claim "fio/libaio generated no block IO tracepoint events" was wrong: the workload file had been placed in `/tmp`, which is tmpfs — tmpfs IO never reaches the block layer. `verify_m2.sh` now uses fio on `/var/tmp` (block-backed ext4) per the ROADMAP. `checkpoints/M2.md`, `docs/M2-biolat-design.md`, and this file were corrected.
 
-2. **biolat tool**: created `tools/biolat/` with:
-   - BPF program (`biolat.bpf.c`): attaches to `block_io_start`/`block_io_done` tracepoints, measures IO latency, outputs log2 histogram in microseconds.
-   - Userspace (`main.rs`): uses libbpf-rs skeleton API to load/attach BPF programs, reads histogram map, prints bcc-compatible output.
-   - Build system: `build.rs` uses `SkeletonBuilder` from libbpf-cargo; `vmlinux.h` generated from kernel BTF.
-   - Tracepoint selection: initially used `block_rq_issue`/`block_rq_complete` but sectors didn't match; switched to `block_io_start`/`block_io_done` (same as bcc biolatency on modern kernels).
+**M3 deliverables**:
 
-3. **Verification**: `scripts/verify_m2.sh` runs 5 parallel comparisons between biolat and bcc `biolatency-bpfcc -d vda` under a fixed fio workload (32M of 4K direct writes, libaio, iodepth=8, file on `/var/tmp`). All 5 runs pass (peak positions within 2x). During review, the earlier claim that fio/libaio generated no block IO tracepoint events was found to be wrong: the workload file had been placed in `/tmp`, which is tmpfs — tmpfs IO never reaches the block layer. With the file on a block-backed filesystem, fio works as the ROADMAP specifies.
+1. **`tools/runqlat/`**: run queue latency histogram (equivalent to bcc runqlat). Attaches to `sched_wakeup`, `sched_wakeup_new`, `sched_switch`. Handles preemption (`prev_state == TASK_RUNNING`) like bcc. Log2 histogram in microseconds.
 
-4. **CI**: `ci_report.sh` M2 section runs cargo fmt, clippy, build, and oracle comparison. All pass.
+2. **`tools/offcpu/`**: off-CPU time by stack (equivalent to bcc offcputime). Attaches to `sched_switch`; accumulates per (pid, comm, kernel stack, user stack). Kernel stacks symbolized from `/proc/kallsyms`; user addresses raw. Idle task excluded.
 
-5. **Documentation**: `docs/M2-biolat-design.md` (design note), `docs/M2-coding-standards.md`, `checkpoints/M2.md`.
+3. **`scripts/verify_m3.sh`** + `scripts/m3/` workloads: three injection scenarios —
+   - A: CPU saturation → runqlat tail (>=64us) fraction rises >=4x vs baseline; matches bcc runqlat within 2x (peak and tail).
+   - B: lock contention (8 threads, one mutex) → offcpu and bcc offcputime both attribute to futex.
+   - C: synchronous disk wait (fio sync direct IO) → offcpu attributes to IO wait stack.
+   All 5 checks pass.
+
+4. **Docs/CI**: `docs/M3-design.md` (design note), `ci_report.sh` M3 section (fmt, clippy, build for both crates + scenarios), `checkpoints/M3.md`.
 
 ## Next Steps
 
-1. **User confirmation**: Review M2 deliverables and checkpoint report. Confirm to proceed to M3.
-2. **M3 preparation**: runqlat and offcpu tools will reuse the libbpf-rs toolchain, vmlinux.h, and build infrastructure from M2.
+1. **User confirmation**: Review M3 deliverables and checkpoint report. Confirm to proceed to M4.
+2. **M4 preparation**: comprehensive case study using biolat/runqlat/offcpu against a real lab workload (candidates: sqlite insert benchmark, fio queue-depth sweep, local inference service CPU-side).
 3. **TrueNAS**: when accessible, re-probe and add to monitoring stack.
 
 ## Open Questions
 
 - TrueNAS SCALE machine accessibility (not reachable since M0).
+- offcpu user-stack symbolization (addresses printed raw; kernel stacks are symbolized). Not required for M3 acceptance.
 
 ## Recent Update
 
 - Date: 2026-08-09
-- Updated by: Agent (M2 session)
+- Updated by: Agent (M3 session)

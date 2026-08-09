@@ -54,6 +54,18 @@ m2_checks() {
 
 # ---------------------------------------------------------------- M3 section
 m3_checks() {
+    check "M3: runqlat cargo fmt" \
+        bash -c 'cd tools/runqlat && cargo fmt -- --check'
+    check "M3: runqlat cargo clippy" \
+        bash -c 'cd tools/runqlat && cargo clippy -- -D warnings'
+    check "M3: runqlat cargo build --release" \
+        bash -c 'cd tools/runqlat && cargo build --release'
+    check "M3: offcpu cargo fmt" \
+        bash -c 'cd tools/offcpu && cargo fmt -- --check'
+    check "M3: offcpu cargo clippy" \
+        bash -c 'cd tools/offcpu && cargo clippy -- -D warnings'
+    check "M3: offcpu cargo build --release" \
+        bash -c 'cd tools/offcpu && cargo build --release'
     check "M3: runqlat/offcpu injection scenarios" bash scripts/verify_m3.sh
 }
 

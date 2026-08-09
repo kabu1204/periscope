@@ -1,0 +1,22 @@
+[package]
+name = "offcpu"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "offcpu"
+path = "src/main.rs"
+
+[build-dependencies]
+libbpf-cargo = "0.25"
+
+[dependencies]
+libbpf-rs = "0.25"
+anyhow = "1"
+libc = "0.2"
+clap = { version = "4", features = ["derive"] }
+
+[package.metadata.libbpf]
+prog_dir = "src/bpf"
+target_dir = "../target/bpf"
