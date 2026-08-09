@@ -1,0 +1,53 @@
+# Monitoring stack for M0 — Prometheus + Grafana + node_exporter
+# Run with: podman-compose -f monitoring/docker-compose.yml up -d
+#
+# Uses host networking to avoid bridge-network firewall issues
+# caused by residual Docker iptables rules on this host.
+
+services:
+  prometheus:
+    image: docker.io/prom/prometheus:latest
+    container_name: periscope-prometheus
+    network_mode: host
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:Z
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    restart: unless-stopped
+
+  node_exporter:
+    image: docker.io/prom/node-exporter:latest
+    container_name: periscope-node-exporter
+    network_mode: host
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|host|rootfs/.+)($$|/)"
+    restart: unless-stopped
+
+  grafana:
+    image: docker.io/grafana/grafana:latest
+    container_name: periscope-grafana
+    network_mode: host
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:Z
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:Z
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
