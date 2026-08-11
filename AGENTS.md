@@ -19,14 +19,14 @@ The project owner (hereafter "the user") has a systems and compiler background b
 - Installing kernel modules is forbidden; modifying host system configuration is forbidden; the monitoring stack must be deployed entirely in containers.
 - When the current approach is found to be infeasible (e.g., kernel version limitations), stop and submit a proposal. Self-initiated switching to an alternative approach is forbidden.
 
-## Communication with the user & Documentation Style
+## User Communication and Documentation Style
 
-When communicating with the user, e.g. progress summary after a task, documentation and etc., follow these guidelines:
+Apply the following guidelines to user-facing communication, task summaries, and documentation:
 
-- Be formal, precise, professional
-- Be clear with explanations and presentation
-- Be well-organized, easy-to-read, easy-to-follow
-- Avoid ambiguous, undefined, jargon, slang and oral terms like "head-of-line", "arms", "regime", "verdict", "caveat", etc.
+- Use a formal, precise, and professional tone.
+- Present explanations clearly.
+- Organize content so that it is easy to read and follow.
+- Avoid ambiguous or undefined terms, unnecessary jargon, slang, and colloquial expressions such as "head-of-line", "arms", "regime", "verdict", and "caveat".
 
 ## Engineering Constraints
 
